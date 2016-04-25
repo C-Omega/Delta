@@ -1,8 +1,9 @@
-﻿<Properties>
+﻿<Properties StartupItem="Core/Core.fsproj">
   <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
   <MonoDevelop.Ide.Workbench ActiveDocument="CommonLib/Component1.fs">
     <Files>
-      <File FileName="CommonLib/Component1.fs" Line="53" Column="117" />
+      <File FileName="CommonLib/Component1.fs" Line="117" Column="16" />
+      <File FileName="CommonLib/Script.fsx" Line="3" Column="29" />
     </Files>
   </MonoDevelop.Ide.Workbench>
   <MonoDevelop.Ide.DebuggingService.Breakpoints>
