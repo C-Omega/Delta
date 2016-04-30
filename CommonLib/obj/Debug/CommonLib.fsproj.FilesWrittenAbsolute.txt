@@ -6,3 +6,4 @@
 /home/harlan/C-Omega/Delta/CommonLib/obj/Debug/.NETFramework,Version=v4.5.AssemblyAttribute.fs
 /home/harlan/C-Omega/Delta/CommonLib/bin/Debug/Core.dll
 /home/harlan/C-Omega/Delta/CommonLib/bin/Debug/Core.dll.mdb
+/home/harlan/C-Omega/Delta/CommonLib/bin/Debug/C_OmegaNet.dll

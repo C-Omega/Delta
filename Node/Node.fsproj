@@ -3,22 +3,22 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{2508399B-084C-40C7-AA35-57EBD7B627A8}</ProjectGuid>
-    <OutputType>Library</OutputType>
-    <RootNamespace>CommonLib</RootNamespace>
-    <AssemblyName>CommonLib</AssemblyName>
+    <ProjectGuid>{CC1A6285-7967-4F6E-8086-56C88D2B29F2}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Node</RootNamespace>
+    <AssemblyName>Node</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
     <OutputPath>bin\Debug</OutputPath>
     <ErrorReport>prompt</ErrorReport>
-    <ConsolePause>false</ConsolePause>
+    <Externalconsole>true</Externalconsole>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <OutputPath>bin\Release</OutputPath>
     <ErrorReport>prompt</ErrorReport>
-    <ConsolePause>false</ConsolePause>
+    <Externalconsole>true</Externalconsole>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />
@@ -26,7 +26,6 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Numerics" />
-    <Reference Include="Mono.Cecil, Version=0.9.5.0, Culture=neutral, PublicKeyToken=0738eb9f132ed756" />
     <Reference Include="C_OmegaNet">
       <HintPath>..\..\Net\bin\Debug\C_OmegaNet.dll</HintPath>
     </Reference>
@@ -36,8 +35,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="Component1.fs" />
-    <Compile Include="Script.fsx" />
+    <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\..\Microsoft SDKs\F#\3.1\Framework\v4.0\Microsoft.FSharp.Targets" />
+  <ItemGroup>
+    <ProjectReference Include="..\CommonLib\CommonLib.fsproj">
+      <Project>{2508399B-084C-40C7-AA35-57EBD7B627A8}</Project>
+      <Name>CommonLib</Name>
+    </ProjectReference>
+  </ItemGroup>
 </Project>
