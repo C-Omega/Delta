@@ -35,16 +35,27 @@ let cts =
 let main argv = 
     let epa = ep loopbackv4 9001
     let epb = ep loopbackv4 9002
-    let sra = (udpIP epa epb).Log Logger.Printn
-    let srb = (udpIP epb epa).Log Logger.Printn
+    let sra = (udpIP epa epb)//.Log Logger.Printn
+    let srb = (udpIP epb epa)//.Log Logger.Printn
     let a = RemoteProcessor(C_Omega.Comm.bbsr sra)
     let ct = new System.Threading.CancellationTokenSource()
     let b = Async.Start(RemoteProcessorHandler(srb),ct.Token)
-    let p = a.start(<@ {on_create = (fun _ -> while true do spin 1000); channel = ignore; name="lol";get_state = (fun () -> Sig.START)}  @>,sra)
-    spin 3000
-    p.channel.Send Sig.KILL
-    spin 1000
+    let p = 
+        a.start(
+            <@ {
+                on_create = (function 
+                    |{pid = p;parent = 0uL} -> (%caller) (Calls.fork p) |> ignore; ((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|127uy|] |> ignore
+                    |_ -> spin 10;((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|69uy|] |>ignore)
+                channel = ignore
+                name="lol"
+                get_state = (fun () -> Sig.START)
+            } @>)
+        |> a.get_pid
+        |> Option.get
+    (a.call(Calls.get_sr(0uL)):?>Comm.bsr).receive()|>printfn "%A"
+    (a.call(Calls.get_sr(0uL)):?>Comm.bsr).receive()|>printfn "%A"
     p.get_state()|>printfn "%A"
-    exit 0 
+    p.channel.Send Sig.KILL
+    spin 10
+    p.get_state()|>printfn "%A"
     0 // return an integer exit code
-
