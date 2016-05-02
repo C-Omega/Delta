@@ -1,9 +1,0 @@
-/home/harlan/C-Omega/Delta/Node/obj/Debug/.NETFramework,Version=v4.5.AssemblyAttribute.fs
-/home/harlan/C-Omega/Delta/Node/bin/Debug/C_OmegaNet.dll
-/home/harlan/C-Omega/Delta/Node/bin/Debug/Core.dll
-/home/harlan/C-Omega/Delta/Node/bin/Debug/CommonLib.dll
-/home/harlan/C-Omega/Delta/Node/bin/Debug/CommonLib.dll.mdb
-/home/harlan/C-Omega/Delta/Node/bin/Debug/Node.exe.mdb
-/home/harlan/C-Omega/Delta/Node/bin/Debug/Node.exe
-/home/harlan/C-Omega/Delta/Node/obj/Debug/Node.exe
-/home/harlan/C-Omega/Delta/Node/obj/Debug/Node.exe.mdb
