@@ -43,17 +43,17 @@ let main argv =
     let p = 
         a.start(
             <@ {
-                on_create = (function 
-                    |{pid = p;parent = 0uL} -> (%caller) (Calls.fork p) |> ignore; ((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|127uy|] |> ignore
-                    |_ -> spin 10;((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|69uy|] |>ignore)
-                channel = ignore
+                on_create = (fun _ -> ((%caller) (Calls.proc_sr 1uL)|>unbox<bsr>).send [|69uy|] |>ignore)
+                    (* |IsParent as v -> 
+                        [|for i = 1 to 10 do yield (%caller) (Calls.fork v.pid)|]|>
+                    |_ -> spin 10;((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|69uy|] |>ignore)*)
+                channel = ignore//(function |Sig.END -> )
                 name="lol"
                 get_state = (fun () -> Sig.START)
             } @>)
         |> a.get_pid
         |> Option.get
-    (a.call(Calls.get_sr(0uL)):?>Comm.bsr).receive()|>printfn "%A"
-    (a.call(Calls.get_sr(0uL)):?>Comm.bsr).receive()|>printfn "%A"
+    (a.call(Calls.proc_sr(1uL)):?>Comm.bsr).receive()|>printfn "%A"
     p.get_state()|>printfn "%A"
     p.channel.Send Sig.KILL
     spin 10

@@ -9,7 +9,8 @@ module Calls =
     ///A record type that represents a processor call
     type ProcessorCall = {call : uint32; arg : obj}
     let get_sr (id:uint64) = {call = 0u; arg = box id}
-    let fork pid = {call = 1u; arg = box pid}
+    let fork (pid:uint64) = {call = 1u; arg = box pid}
+    let proc_sr (pid:uint64) = {call = 2u; arg = box pid}
 module Processes = 
     open Microsoft.FSharp.Quotations
     open Extensions
@@ -182,6 +183,7 @@ module Processes =
         |GotPCO of Expr<ProcessCreationOptions>
         |GetParent of uint64
         |GotParent of uint64
+        |ProcMsg of byte[]
         |No
         member x.GetBytes() = 
             match x with
@@ -199,6 +201,7 @@ module Processes =
             |GotPCO(p) -> Array.append [|11uy|] (ProcessCreationOptions.Mash p)
             |GetParent(i) -> Array.append [|12uy|] (_uint64_b i)
             |GotParent(i) -> Array.append [|13uy|] (_uint64_b i)
+            |ProcMsg(b) -> Array.append [|14uy|] b
             |No -> [|255uy|]
         static member OfBytes(b':byte[]) = 
             match b'.[0],if b'.Length > 1 then Some(b'.[1..]) else None with
@@ -216,11 +219,13 @@ module Processes =
             |11uy,Some(b) -> GotPCO(ProcessCreationOptions.UnMash b)
             |12uy,Some(b) -> GetParent(_b_uint64 b)
             |13uy,Some(b) -> GotParent(_b_uint64 b)
+            |14uy,Some(b) -> ProcMsg(b)
             |255uy, None -> No
             |_ -> raise BadCommunication
-    let LocalProcessor(getsr : (uint64 -> Comm.bsr) option) =
+    let LocalProcessor(getsr : ((uint64*bool) -> Comm.bsr) option) =
         let getsr = defaultArg getsr (ignore >> Comm.loopback<byte[]>)
         let srs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
+        let procsrs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let reg f (ct:System.Threading.CancellationToken) = 
             let v = System.Threading.Thread(System.Threading.ThreadStart(f))
             ct.Register(new System.Action(v.Abort))|>ignore
@@ -271,7 +276,7 @@ module Processes =
                     lock srs (fun() -> 
                         match srs.TryGetValue n with 
                         |true,v -> box v 
-                        |_ -> let sr = getsr(n) in srs.Add(n,sr); box sr
+                        |_ -> let sr = getsr(n,false) in srs.Add(n,sr); box sr
                     )
                 |{call = 1u; arg = parent} ->
                     let parent = unbox parent
@@ -299,6 +304,13 @@ module Processes =
                         reg(fun () -> pco.on_create v) ct.Token
                     ) ct.Token)
                     pid|>box
+                |{call = 2u; arg = n} ->
+                    let n = unbox n
+                    lock procsrs (fun() -> 
+                        match procsrs.TryGetValue n with 
+                        |true,v -> box v 
+                        |_ -> let sr = getsr(n,true) in procsrs.Add(n,sr); box sr
+                    )
                 |_ -> box()
         }
     let SafeLocalProcessor(ts) = 
@@ -391,6 +403,9 @@ module Processes =
                 |{call = 0u;arg = (i)} -> 
                     let g = Net.Protocols.GPP(unbox i)
                     ({Comm.send = Msg >> b >> g.sign >> sr.Send;Comm.receive = fun() -> sr.TakeMap(g.verify)|>Array.skip 1} : Comm.bsr)|>box
+                |{call = 2u;arg = (i)} ->
+                    let g = Net.Protocols.GPP(unbox i)
+                    ({Comm.send = ProcMsg >> b >> g.sign >> sr.Send;Comm.receive = fun() -> sr.TakeMap(g.verify)|>Array.skip 1} : Comm.bsr)|>box
                 |_ -> box()
         }
     
@@ -398,10 +413,19 @@ module Processes =
         async{
             let f (v:RemoteCommunication) = v.GetBytes()
             let msg = new System.Collections.Generic.Dictionary<uint64,System.Collections.Generic.Queue<byte[]>>()
-            let p = LocalProcessor(Some(fun i -> 
-                let i' = _uint64_b i
-                msg.Add(i,System.Collections.Generic.Queue())
-                {Comm.send = Msg >> f >> Array.append i' >> sr.send;Comm.receive = msg.[i].Dequeue >> side (printfn "!%A") >> Array.skip 1}))
+            let procmsg = new System.Collections.Generic.Dictionary<uint64,System.Collections.Generic.Queue<byte[]>>()
+            let p = 
+                LocalProcessor(
+                    Some(
+                        function 
+                            |i,false ->
+                                let i' = _uint64_b i
+                                msg.Add(i,System.Collections.Generic.Queue())
+                                {Comm.send = Msg >> f >> Array.append i' >> sr.send;Comm.receive = msg.[i].Dequeue >> side (printfn "!%A") >> Array.skip 1}
+                            |i,true ->
+                                let i' = _uint64_b i
+                                procmsg.Add(i,System.Collections.Generic.Queue())
+                                {Comm.send = ProcMsg >> f >> Array.append i' >> sr.send;Comm.receive = procmsg.[i].Dequeue >> side (printfn "!%A") >> Array.skip 1}))
             while true do 
                 let a,b = sr.receive()|>Array.splitAt 8
                 match RemoteCommunication.OfBytes(b) with
@@ -419,6 +443,7 @@ module Processes =
                 |GetName(i) -> i |> p.get_pid |> (function |Some(v) -> v.name |> GotName |None -> No) |> f |>Array.append a|>sr.send
                 |GetPCO(i) -> i |> p.get_pid |> (function |Some(v) -> v.pco |> GotPCO |None -> No) |> f |>Array.append a|>sr.send
                 |GetParent(i) -> i |> p.get_pid |> (function |Some(v) -> v.parent |> GotParent |None -> No) |> f |>Array.append a|>sr.send
+                |ProcMsg(c) -> (p.call(proc_sr(_b_uint64 a)):?>Comm.bsr).send c
                 |_ -> raise BadCommunication
         }
     let SafeRemoteProcessorHandler(sr:Comm.bsr,ct) = 
@@ -442,3 +467,4 @@ module Processes =
                 |GetName(i) -> i |> p.get_pid |> (function |Some(v) -> v.name|> GotName |None -> No) |> f |>Array.append a|>sr.send
                 |_ -> raise BadCommunication
         }
+    let (|IsParent|_|) (v:Process) = if v.parent = 0uL then Some(IsParent) else None
