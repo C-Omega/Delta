@@ -27,11 +27,11 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Numerics" />
     <Reference Include="Mono.Cecil, Version=0.9.5.0, Culture=neutral, PublicKeyToken=0738eb9f132ed756" />
-    <Reference Include="C_OmegaNet">
-      <HintPath>..\..\Net\bin\Debug\C_OmegaNet.dll</HintPath>
-    </Reference>
     <Reference Include="Core">
       <HintPath>..\Core\bin\Debug\Core.dll</HintPath>
+    </Reference>
+    <Reference Include="C_OmegaNet">
+      <HintPath>..\Net\bin\Debug\C_OmegaNet.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>

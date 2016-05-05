@@ -222,8 +222,7 @@ module Processes =
             |14uy,Some(b) -> ProcMsg(b)
             |255uy, None -> No
             |_ -> raise BadCommunication
-    let LocalProcessor(getsr : ((uint64*bool) -> Comm.bsr) option) =
-        let getsr = defaultArg getsr (ignore >> Comm.loopback<byte[]>)
+    let LocalProcessor(getsr : (uint64*bool) -> Comm.bsr) =
         let srs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let procsrs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let reg f (ct:System.Threading.CancellationToken) = 
@@ -315,6 +314,7 @@ module Processes =
         }
     let SafeLocalProcessor(ts) = 
         let srs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
+        let procsrs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let reg f (ct:System.Threading.CancellationToken) = 
             let v = System.Threading.Thread(System.Threading.ThreadStart(f))
             ct.Register(new System.Action(v.Abort))|>ignore
@@ -331,7 +331,7 @@ module Processes =
                 let ct = new System.Threading.CancellationTokenSource()
                 lock cts (fun () -> cts.Add(pid,ct.Cancel))
                 (reg(fun() ->
-                    let pco = ProcessCreationOptions.Express(pco',ts,x.call)
+                    let pco = ProcessCreationOptions.Express(pco',x.call)
                     let v = 
                         {
                             pid = pid
@@ -362,11 +362,44 @@ module Processes =
                 match p with
                 |{call = 0u; arg = n} -> 
                     let n = unbox n
-                    match srs.TryGetValue n with 
-                    |true,v -> box v 
-                    |_ -> 
-                        let sr = Comm.loopback<byte[]>()
-                        srs.Add(n,sr);box sr
+                    lock srs (fun() -> 
+                        match srs.TryGetValue n with 
+                        |true,v -> box v 
+                        |_ -> let sr = getsr(n,false) in srs.Add(n,sr); box sr
+                    )
+                |{call = 1u; arg = parent} ->
+                    let parent = unbox parent
+                    let pid = nextpid() 
+                    let ct = new System.Threading.CancellationTokenSource()
+                    let pco' = processes.[parent].pco
+                    lock cts (fun () -> cts.Add(pid,ct.Cancel))
+                    (reg(fun() ->
+                        let pco = ProcessCreationOptions.Express(pco',x.call)
+                        let v = 
+                            {
+                                pid = pid
+                                channel = SigChannel(function
+                                        |Sig.KILL -> 
+                                            ct.Cancel()
+                                            processes.Remove(pid)|>ignore
+                                            cts.Remove(pid)|>ignore
+                                        |s -> reg(fun() -> pco.channel(s)) ct.Token)
+                                get_state = pco.get_state
+                                name = pco.name
+                                pco = pco'
+                                parent = parent
+                            }
+                        processes.Add (pid,v)
+                        reg(fun () -> pco.on_create v) ct.Token
+                    ) ct.Token)
+                    pid|>box
+                |{call = 2u; arg = n} ->
+                    let n = unbox n
+                    lock procsrs (fun() -> 
+                        match procsrs.TryGetValue n with 
+                        |true,v -> box v 
+                        |_ -> let sr = getsr(n,true) in procsrs.Add(n,sr); box sr
+                    )
                 |_ -> box()
         }
     let RemoteProcessor(sr:Comm.bbsr) =
