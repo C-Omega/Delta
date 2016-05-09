@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{CC1A6285-7967-4F6E-8086-56C88D2B29F2}</ProjectGuid>
+    <ProjectGuid>{FAA65E13-0E10-4DB3-A862-F78C385E0168}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>Node</RootNamespace>
     <AssemblyName>Node</AssemblyName>
@@ -28,9 +28,6 @@
     <Reference Include="System.Numerics" />
     <Reference Include="C_OmegaNet">
       <HintPath>..\..\Net\bin\Debug\C_OmegaNet.dll</HintPath>
-    </Reference>
-    <Reference Include="Core">
-      <HintPath>..\Core\bin\Debug\Core.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>

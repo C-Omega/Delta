@@ -10,7 +10,7 @@ module Calls =
     type ProcessorCall = {call : uint32; arg : obj}
     let get_sr (id:uint64) = {call = 0u; arg = box id}
     let fork (pid:uint64) = {call = 1u; arg = box pid}
-    let proc_sr (pid:uint64) = {call = 2u; arg = box pid}
+    let proc_sr (from:uint64,dest:uint64) = {call = 2u; arg = box(from,dest)}
 module Processes = 
     open Microsoft.FSharp.Quotations
     open Extensions
@@ -80,16 +80,23 @@ module Processes =
             let rec outer a (d:System.Collections.Generic.Dictionary<Var,obj>)= 
                 let rec inner = function
                     |Patterns.Value(v,t) -> v
-                    |Patterns.Var(s) -> Seq.pick(fun (v:System.Collections.Generic.KeyValuePair<Var,obj>) -> if v.Key.Name = s.Name then Some v.Value else None) d
+                    |Patterns.Var(s) -> Seq.pick(fun (v:System.Collections.Generic.KeyValuePair<Var,obj>) ->if v.Key.Name = s.Name then Some v.Value else None) d
                     |Patterns.VarSet(v,e) -> d.[v] <- (inner e);box()
                     |Patterns.Sequential(a,b) -> inner a |>ignore;inner b
                     |Patterns.PropertyGet(Some(v),a,b) -> a.GetValue(inner v,b|>Seq.map inner|>Seq.toArray)
                     |Patterns.PropertyGet(None,a,b) -> a.GetValue(null,b|>Seq.map inner|>Seq.toArray)
                     |Patterns.PropertySet(Some(v),a,b,c) -> a.SetValue(inner v,inner c,b|>Seq.map inner|>Seq.toArray)|>box
                     |Patterns.PropertySet(None,a,b,c) -> a.SetValue(null,inner c,b|>Seq.map inner|>Seq.toArray)|>box
-                    |Patterns.Call(v,a,b) -> a.Invoke(v,b|>Seq.map inner|>Seq.toArray)
+                    |Patterns.Call(v,a,b) -> 
+                        try a.Invoke(v,b|>Seq.map inner|>Seq.toArray) with
+                        |e -> 
+                            let rec f (v:System.Exception) = 
+                                if isNull v.InnerException then 
+                                    raise v 
+                                else f v.InnerException
+                            f e
                     |Patterns.NewRecord(t,b) -> Reflection.FSharpValue.MakeRecord(t,b|>Seq.map (inner >> box)|>Seq.toArray)
-                    |Patterns.Let(v,a,b) -> d.Add(v,inner a); inner b
+                    |Patterns.Let(v,a,b) -> d.Remove(v)|>ignore; d.Add(v,inner a); inner b
                     |Patterns.Coerce(e,t) -> (inner e)
                     |Patterns.NewObject(t,b) -> b|>Seq.map (inner >> box)|>Seq.toArray|>t.Invoke
                     |Patterns.Lambda(a,l) -> 
@@ -107,7 +114,15 @@ module Processes =
                         let f (a,b) = e'.Type.GetMethod("Set").Invoke(a,b)
                         List.map inner e |> Seq.iteri(fun i v -> f(arr, [|box i;box v|]) |> ignore)
                         box arr
-                    |e -> failwithf "%A" e
+                    |Patterns.NewTuple(e) ->
+                        let t = Reflection.FSharpType.MakeTupleType(Seq.map (fun (v:Expr) -> v.Type) e|>Array.ofSeq)
+                        Reflection.FSharpValue.MakeTuple(Seq.map inner e|>Array.ofSeq,t)
+                    |Patterns.TupleGet(e,i) -> Reflection.FSharpValue.GetTupleField(inner e, i)
+                    |Patterns.UnionCaseTest(e,v) -> 
+                        match Reflection.FSharpValue.PreComputeUnionTagMemberInfo(v.DeclaringType) with
+                        | :? System.Reflection.PropertyInfo as p -> Expression.
+
+                 -> printfn "?%A" e; failwithf "%A" e
                 inner a
             outer v (new System.Collections.Generic.Dictionary<Var,obj>(dict [callerVar,box caller])) |> unbox<ProcessCreationOptions>
         static member Express(v,ct,caller) = 
@@ -183,7 +198,7 @@ module Processes =
         |GotPCO of Expr<ProcessCreationOptions>
         |GetParent of uint64
         |GotParent of uint64
-        |ProcMsg of byte[]
+        |ProcMsg of uint64 * byte[]
         |No
         member x.GetBytes() = 
             match x with
@@ -201,7 +216,7 @@ module Processes =
             |GotPCO(p) -> Array.append [|11uy|] (ProcessCreationOptions.Mash p)
             |GetParent(i) -> Array.append [|12uy|] (_uint64_b i)
             |GotParent(i) -> Array.append [|13uy|] (_uint64_b i)
-            |ProcMsg(b) -> Array.append [|14uy|] b
+            |ProcMsg(f,b) -> Array.concat [|[|14uy|];_uint64_b f; b|]
             |No -> [|255uy|]
         static member OfBytes(b':byte[]) = 
             match b'.[0],if b'.Length > 1 then Some(b'.[1..]) else None with
@@ -219,12 +234,12 @@ module Processes =
             |11uy,Some(b) -> GotPCO(ProcessCreationOptions.UnMash b)
             |12uy,Some(b) -> GetParent(_b_uint64 b)
             |13uy,Some(b) -> GotParent(_b_uint64 b)
-            |14uy,Some(b) -> ProcMsg(b)
+            |14uy,Some(b) -> ProcMsg(_b_uint64 b,b.[..8])
             |255uy, None -> No
             |_ -> raise BadCommunication
-    let LocalProcessor(getsr : (uint64*bool) -> Comm.bsr) =
+    let LocalProcessor(getsr : (Choice<uint64,uint64*uint64>) -> Comm.bsr) =
         let srs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
-        let procsrs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
+        let procsrs = new System.Collections.Generic.Dictionary<uint64*uint64,Comm.bsr>()
         let reg f (ct:System.Threading.CancellationToken) = 
             let v = System.Threading.Thread(System.Threading.ThreadStart(f))
             ct.Register(new System.Action(v.Abort))|>ignore
@@ -232,9 +247,9 @@ module Processes =
         let processes = new System.Collections.Generic.Dictionary<uint64, Process>()
         let nextpid =
             let pid = ref 1uL
-            let rec inner() = if processes.ContainsKey(!pid) then pid := !pid + 1uL;inner() else !pid
+            let rec inner() = pid := !pid + 1uL;!pid
             fun() -> lock pid inner
-        let cts = new System.Collections.Generic.Dictionary<uint64, (unit -> unit)>()
+        let cts = new ResizeArray<uint64 * (unit -> unit)>()
         {new IProcessor with
             member x.start(pco') = 
                 let pid = nextpid() 
@@ -249,7 +264,7 @@ module Processes =
                                     |Sig.KILL -> 
                                         ct.Cancel()
                                         processes.Remove(pid)|>ignore
-                                        cts.Remove(pid)|>ignore
+                                        cts.RemoveAll(System.Predicate(function |p,_ -> p=pid))|>ignore
                                     |s -> reg(fun() -> pco.channel(s)) ct.Token)
                             get_state = pco.get_state
                             name = pco.name
@@ -264,8 +279,8 @@ module Processes =
             member x.get_pid i = processes.TryGetValue(i)|>Option.ofBoolObjTuple
             member x.kill(i) = 
                 lock processes (fun() -> lock cts (fun () ->
-                    match cts.TryGetValue(i) with
-                    |true,v -> v();processes.Remove(i)|>ignore
+                    match Seq.tryFind(function  |p,v-> p=i) cts with
+                    |Some (i,v) -> v();processes.Remove(i)|>ignore
                     |_ -> ()
                 ))
             member x.call p =
@@ -275,7 +290,7 @@ module Processes =
                     lock srs (fun() -> 
                         match srs.TryGetValue n with 
                         |true,v -> box v 
-                        |_ -> let sr = getsr(n,false) in srs.Add(n,sr); box sr
+                        |_ -> let sr = getsr(Choice1Of2 n) in srs.Add(n,sr); box sr
                     )
                 |{call = 1u; arg = parent} ->
                     let parent = unbox parent
@@ -292,27 +307,31 @@ module Processes =
                                         |Sig.KILL -> 
                                             ct.Cancel()
                                             processes.Remove(pid)|>ignore
-                                            cts.Remove(pid)|>ignore
+                                            cts.RemoveAll(System.Predicate(function |p,_ -> p=pid))|>ignore
                                         |s -> reg(fun() -> pco.channel(s)) ct.Token)
                                 get_state = pco.get_state
                                 name = pco.name
                                 pco = pco'
                                 parent = parent
                             }
-                        processes.Add (pid,v)
+                        lock processes (fun()->processes.Add (pid,v))
                         reg(fun () -> pco.on_create v) ct.Token
                     ) ct.Token)
                     pid|>box
                 |{call = 2u; arg = n} ->
                     let n = unbox n
-                    lock procsrs (fun() -> 
-                        match procsrs.TryGetValue n with 
-                        |true,v -> box v 
-                        |_ -> let sr = getsr(n,true) in procsrs.Add(n,sr); box sr
-                    )
+                    lock procsrs (fun () ->
+                    match procsrs.TryGetValue n with 
+                    |true,v -> box v 
+                    |_ -> 
+                        let sr = getsr(Choice2Of2(n)) 
+                        procsrs.Add(n,sr)
+                        let i = snd n,fst n
+                        procsrs.Add(i,getsr(Choice2Of2(i)))
+                        box sr)
                 |_ -> box()
         }
-    let SafeLocalProcessor(ts) = 
+    let SafeLocalProcessor(ts,getsr) = 
         let srs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let procsrs = new System.Collections.Generic.Dictionary<uint64,Comm.bsr>()
         let reg f (ct:System.Threading.CancellationToken) = 
@@ -435,34 +454,63 @@ module Processes =
                 match p with 
                 |{call = 0u;arg = (i)} -> 
                     let g = Net.Protocols.GPP(unbox i)
-                    ({Comm.send = Msg >> b >> g.sign >> sr.Send;Comm.receive = fun() -> sr.TakeMap(g.verify)|>Array.skip 1} : Comm.bsr)|>box
-                |{call = 2u;arg = (i)} ->
-                    let g = Net.Protocols.GPP(unbox i)
-                    ({Comm.send = ProcMsg >> b >> g.sign >> sr.Send;Comm.receive = fun() -> sr.TakeMap(g.verify)|>Array.skip 1} : Comm.bsr)|>box
+                    ({
+                        Comm.send = Msg >> b >> g.sign >> sr.Send
+                        Comm.receive = 
+                            fun() -> 
+                                sr.TakeMap(fun b -> 
+                                    match g.verify(b) with
+                                    |Some(b) -> if b.[0] = 9uy then Some(b.[1..]) else None
+                                    |_ -> None
+                                )
+                    } : Comm.bsr)|>box
+                    
                 |_ -> box()
         }
     
     let RemoteProcessorHandler(sr:Comm.bsr) = 
         async{
             let f (v:RemoteCommunication) = v.GetBytes()
-            let msg = new System.Collections.Generic.Dictionary<uint64,System.Collections.Generic.Queue<byte[]>>()
-            let procmsg = new System.Collections.Generic.Dictionary<uint64,System.Collections.Generic.Queue<byte[]>>()
+            let msg = new System.Collections.Generic.Dictionary<uint64,System.Collections.Generic.Queue<byte[]> ref>()
+            let procmsg = new System.Collections.Generic.Dictionary<uint64*uint64,System.Collections.Generic.Queue<byte[]> ref>()
             let p = 
                 LocalProcessor(
-                    Some(
                         function 
-                            |i,false ->
+                            |Choice1Of2(i) ->
                                 let i' = _uint64_b i
-                                msg.Add(i,System.Collections.Generic.Queue())
-                                {Comm.send = Msg >> f >> Array.append i' >> sr.send;Comm.receive = msg.[i].Dequeue >> side (printfn "!%A") >> Array.skip 1}
-                            |i,true ->
-                                let i' = _uint64_b i
-                                procmsg.Add(i,System.Collections.Generic.Queue())
-                                {Comm.send = ProcMsg >> f >> Array.append i' >> sr.send;Comm.receive = procmsg.[i].Dequeue >> side (printfn "!%A") >> Array.skip 1}))
-            while true do 
+                                let q = System.Collections.Generic.Queue()
+                                msg.Add(i,ref q)
+                                {
+                                    Comm.send = Msg >> f >> Array.append i' >> sr.send
+                                    Comm.receive = 
+                                        fun () -> 
+                                            printfn "Rec"
+                                            while q.Count = 0 do spin 0
+                                            q.Dequeue()
+                                            //(function |a,b when a = i -> Some(async{return b}) |_ -> None)
+                                        
+                                }
+                            |Choice2Of2(f,t) ->
+                                let q = System.Collections.Generic.Queue()
+                                let q' = ref None
+                                procmsg.Add((f,t),ref q)
+                                {
+                                    Comm.send = 
+                                        fun b -> 
+                                            match !q' with 
+                                            |None -> q' := Some(procmsg.[t,f]);q'.Value.Value.Value.Enqueue(b)
+                                            |Some(v) -> v.Value.Enqueue b
+                                    Comm.receive = 
+                                        fun () ->
+                                            printfn "Recproc"
+                                            while q.Count = 0 do spin 0
+                                            q.Dequeue()
+                                }
+                                )
+            while true do
                 let a,b = sr.receive()|>Array.splitAt 8
                 match RemoteCommunication.OfBytes(b) with
-                |Msg(c) -> (p.call(get_sr(_b_uint64 a)):?>Comm.bsr).send c
+                |Msg(c) -> (p.call(get_sr(_b_uint64 a)))|>ignore;msg.[_b_uint64 a].Value.Enqueue c//.send c
                 |Start(c) -> c |> p.start |> Started |> f |> Array.append a |> sr.send
                 |SetChannel(i,c) -> i |> p.get_pid |> Option.iter (fun v -> v.channel.Send c)
                 |GetState(i) -> 
@@ -476,7 +524,7 @@ module Processes =
                 |GetName(i) -> i |> p.get_pid |> (function |Some(v) -> v.name |> GotName |None -> No) |> f |>Array.append a|>sr.send
                 |GetPCO(i) -> i |> p.get_pid |> (function |Some(v) -> v.pco |> GotPCO |None -> No) |> f |>Array.append a|>sr.send
                 |GetParent(i) -> i |> p.get_pid |> (function |Some(v) -> v.parent |> GotParent |None -> No) |> f |>Array.append a|>sr.send
-                |ProcMsg(c) -> (p.call(proc_sr(_b_uint64 a)):?>Comm.bsr).send c
+                |ProcMsg(from,c) -> (p.call(proc_sr(_b_uint64 a,from)):?>Comm.bsr).send c
                 |_ -> raise BadCommunication
         }
     let SafeRemoteProcessorHandler(sr:Comm.bsr,ct) = 
@@ -501,3 +549,4 @@ module Processes =
                 |_ -> raise BadCommunication
         }
     let (|IsParent|_|) (v:Process) = if v.parent = 0uL then Some(IsParent) else None
+    let prochelp (parent : Process ->unit, child) = function |IsParent as p -> parent p |p -> child p

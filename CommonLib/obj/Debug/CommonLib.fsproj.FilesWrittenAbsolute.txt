@@ -3,5 +3,5 @@
 /home/harlan/C-Omega/Delta/CommonLib/bin/Debug/CommonLib.dll
 /home/harlan/C-Omega/Delta/CommonLib/obj/Debug/CommonLib.dll
 /home/harlan/C-Omega/Delta/CommonLib/obj/Debug/CommonLib.dll.mdb
-/home/harlan/C-Omega/Delta/CommonLib/bin/Debug/C_OmegaNet.dll
 /home/harlan/C-Omega/Delta/CommonLib/bin/Debug/Core.dll
+/home/harlan/C-Omega/Delta/CommonLib/bin/Debug/C_OmegaNet.dll

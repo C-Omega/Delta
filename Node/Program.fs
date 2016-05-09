@@ -32,30 +32,55 @@ let cts =
     |]
 
 [<EntryPoint>]
-let main argv = 
+let main(argc) =
     let epa = ep loopbackv4 9001
     let epb = ep loopbackv4 9002
     let sra = (udpIP epa epb)//.Log Logger.Printn
     let srb = (udpIP epb epa)//.Log Logger.Printn
-    let a = RemoteProcessor(C_Omega.Comm.bbsr sra)
+    let a = RemoteProcessor(new bbsr(sra))
     let ct = new System.Threading.CancellationTokenSource()
     let b = Async.Start(RemoteProcessorHandler(srb),ct.Token)
-    let p = 
+    let rec factorial = function |0|1 -> 1|x -> x*factorial(x-1)
+    let p =   
         a.start(
-            <@ {
-                on_create = (fun _ -> ((%caller) (Calls.proc_sr 1uL)|>unbox<bsr>).send [|69uy|] |>ignore)
-                    (* |IsParent as v -> 
-                        [|for i = 1 to 10 do yield (%caller) (Calls.fork v.pid)|]|>
-                    |_ -> spin 10;((%caller) (Calls.get_sr 0uL)|>unbox<bsr>).send [|69uy|] |>ignore)*)
-                channel = ignore//(function |Sig.END -> )
-                name="lol"
-                get_state = (fun () -> Sig.START)
+            <@
+            let procp  (p:Process) =
+                [|
+                 for i = 1 to 1 do
+                 yield (%caller) (Calls.fork p.pid) |> unbox<uint64>
+                |]
+                |> side (printfn "Forked: %A")
+                |> Array.mapi(fun n (i:uint64) ->
+                                    let sr = (%caller)(Calls.proc_sr(p.pid,i))|>unbox<bsr>
+                                    printfn "Got sr"
+                                    sr.send(_int32_b n)
+                                    let r = sr.receive()
+                                    if isNull(r) then 
+                                        failwith "NOPE!"
+                                    printfn "GOTVAL"
+                                    let v = System.BitConverter.ToDouble(r,0)//SArray.chunkBySize 4 r|> Array.map _b_int32)
+                                    printfn "DONE!%A" v
+                                    v
+                                      )
+                |>Array.sum
+                |>printfn "%A"
+                //|>System.BitConverter.GetBytes
+                //|>((%caller)(Calls.get_sr p.pid) |> unbox<bsr>).send
+            let procc (p:Process) =
+                printfn "Started child %A" p.pid
+                let sr = (%caller)(Calls.proc_sr(p.pid,p.parent))|>unbox<bsr>
+                let i = sr.receive() |> _b_int32
+                printfn "Recieved"
+                System.BitConverter.GetBytes(1.)// |>Array.concat
+                //|> (printfn "LOL: %A")
+                |> sr.send
+            {
+                    on_create = function |IsParent as p -> procp p |p -> procc p//prochelp(procp, procc)
+                    channel = ignore
+                    name="lol"
+                    get_state = (fun () -> Sig.START)
+
             } @>)
-        |> a.get_pid
-        |> Option.get
-    (a.call(Calls.proc_sr(1uL)):?>Comm.bsr).receive()|>printfn "%A"
-    p.get_state()|>printfn "%A"
-    p.channel.Send Sig.KILL
-    spin 10
-    p.get_state()|>printfn "%A"
+    let v = (a.call(Calls.get_sr(p)):?>Comm.bsr)
+    v.receive()|>printfn "%A"
     0 // return an integer exit code
