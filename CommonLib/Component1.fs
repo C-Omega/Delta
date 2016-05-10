@@ -78,7 +78,7 @@ module Processes =
                 s.ToArray())
         static member Express(v,caller) = 
             let rec outer a (d:System.Collections.Generic.Dictionary<Var,obj>)= 
-                let rec inner = function
+                let rec inner = side (printfn "%A") >> function
                     |Patterns.Value(v,t) -> v
                     |Patterns.Var(s) -> Seq.pick(fun (v:System.Collections.Generic.KeyValuePair<Var,obj>) ->if v.Key.Name = s.Name then Some v.Value else None) d
                     |Patterns.VarSet(v,e) -> d.[v] <- (inner e);box()
@@ -88,10 +88,14 @@ module Processes =
                     |Patterns.PropertySet(Some(v),a,b,c) -> a.SetValue(inner v,inner c,b|>Seq.map inner|>Seq.toArray)|>box
                     |Patterns.PropertySet(None,a,b,c) -> a.SetValue(null,inner c,b|>Seq.map inner|>Seq.toArray)|>box
                     |Patterns.Call(v,a,b) -> 
-                        try a.Invoke(v,b|>Seq.map inner|>Seq.toArray) with
+                        let args = b |> Seq.map inner |> Seq.toArray
+                        try 
+                            a.Invoke(v,args) 
+                        with
                         |e -> 
                             let rec f (v:System.Exception) = 
                                 if isNull v.InnerException then 
+                                    printfn "%A" (a,args)
                                     raise v 
                                 else f v.InnerException
                             f e
@@ -118,11 +122,9 @@ module Processes =
                         let t = Reflection.FSharpType.MakeTupleType(Seq.map (fun (v:Expr) -> v.Type) e|>Array.ofSeq)
                         Reflection.FSharpValue.MakeTuple(Seq.map inner e|>Array.ofSeq,t)
                     |Patterns.TupleGet(e,i) -> Reflection.FSharpValue.GetTupleField(inner e, i)
-                    |Patterns.UnionCaseTest(e,v) -> 
-                        match Reflection.FSharpValue.PreComputeUnionTagMemberInfo(v.DeclaringType) with
-                        | :? System.Reflection.PropertyInfo as p -> Expression.
-
-                 -> printfn "?%A" e; failwithf "%A" e
+                    //#credit https://github.com/SwensenSoftware/unquote
+                    |Patterns.UnionCaseTest(e,v) -> fst(Reflection.FSharpValue.GetUnionFields(inner e,v.DeclaringType)).Tag = v.Tag |> box
+                    |e -> failwithf "? %A" e
                 inner a
             outer v (new System.Collections.Generic.Dictionary<Var,obj>(dict [callerVar,box caller])) |> unbox<ProcessCreationOptions>
         static member Express(v,ct,caller) = 
@@ -498,7 +500,7 @@ module Processes =
                                     Comm.send = 
                                         fun b -> 
                                             match !q' with 
-                                            |None -> q' := Some(procmsg.[t,f]);q'.Value.Value.Value.Enqueue(b)
+                                            |None -> lock q' (fun() -> q' := Some(procmsg.[t,f]));q'.Value.Value.Value.Enqueue(b)
                                             |Some(v) -> v.Value.Enqueue b
                                     Comm.receive = 
                                         fun () ->

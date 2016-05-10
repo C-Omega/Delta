@@ -49,19 +49,19 @@ let main(argc) =
                  for i = 1 to 1 do
                  yield (%caller) (Calls.fork p.pid) |> unbox<uint64>
                 |]
-                |> side (printfn "Forked: %A")
-                |> Array.mapi(fun n (i:uint64) ->
-                                    let sr = (%caller)(Calls.proc_sr(p.pid,i))|>unbox<bsr>
+                |> Array.map(fun (n:uint64) ->
+                                    let sr = (%caller)(Calls.proc_sr(p.pid,n))|>unbox<bsr>
                                     printfn "Got sr"
-                                    sr.send(_int32_b n)
+                                    sr.send(_int32_b 1)
                                     let r = sr.receive()
                                     if isNull(r) then 
                                         failwith "NOPE!"
                                     printfn "GOTVAL"
+                                    System.Console.Write(r)
                                     let v = System.BitConverter.ToDouble(r,0)//SArray.chunkBySize 4 r|> Array.map _b_int32)
                                     printfn "DONE!%A" v
                                     v
-                                      )
+                                    )
                 |>Array.sum
                 |>printfn "%A"
                 //|>System.BitConverter.GetBytes
@@ -71,8 +71,7 @@ let main(argc) =
                 let sr = (%caller)(Calls.proc_sr(p.pid,p.parent))|>unbox<bsr>
                 let i = sr.receive() |> _b_int32
                 printfn "Recieved"
-                System.BitConverter.GetBytes(1.)// |>Array.concat
-                //|> (printfn "LOL: %A")
+                System.BitConverter.GetBytes(float i/float (factorial i))
                 |> sr.send
             {
                     on_create = function |IsParent as p -> procp p |p -> procc p//prochelp(procp, procc)
